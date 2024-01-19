@@ -49,15 +49,52 @@ impl AffinePointNormal {
         let y1 = self.y;
         let y2 = other.y;
 
-        let mut x3_numerator = &(&x1 * &y2) + &(&x2 * &y1);
-        let mut y3_numerator = &(&y1 * &y2) + &(&x1 * &x2);
+        let x3_numerator = &(&x1 * &y2) + &(&x2 * &y1);
+        let y3_numerator = &(&y1 * &y2) + &(&x1 * &x2);
         let f = &(&x1 * &x2) * &(&y1 * &y2);
-        let d_mul_f = &f * &FieldElement::D;
+        let d_mul_f = &f * &constants::EDWARDS_D;
 
         let x3 = &x3_numerator * &(&FieldElement::ONE + &d_mul_f).invert();
         let y3 = &y3_numerator * &(&FieldElement::ONE - &d_mul_f).invert();
 
         AffinePointNormal { x: x3, y: y3 }
+    }
+
+    pub fn from_edwards(p: EdwardsPoint) -> Self {
+        let z_inv = p.Z.invert(); // Assuming FieldElement has an invert method
+        let x_affine = &p.X * &z_inv;
+        let y_affine = &p.Y * &z_inv;
+
+        AffinePointNormal {
+            x: x_affine,
+            y: y_affine,
+        }
+    }
+
+    pub fn to_edwards(&self) -> EdwardsPoint {
+        EdwardsPoint {
+            X: self.x,
+            Y: self.y,
+            Z: FieldElement::ONE,
+            T: &self.x * &self.y,
+        }
+    }
+
+    pub fn double(&mut self) {
+        // ????
+        let x1 = self.x;
+        let y1 = self.y;
+
+        let x3_numerator = &(&x1 * &y1) + &(&x1 * &y1);
+        let y3_numerator = &(&y1 * &y1) + &(&x1 * &x1);
+        let f = &(&x1 * &x1) * &(&y1 * &y1);
+        let d_mul_f = &f * &constants::EDWARDS_D;
+
+        let x3 = &x3_numerator * &(&FieldElement::ONE + &d_mul_f).invert();
+        let y3 = &y3_numerator * &(&FieldElement::ONE - &d_mul_f).invert();
+
+        self.x = x3;
+        self.y = y3;
     }
 }
 
@@ -84,6 +121,16 @@ impl AffinePoint {
         let bytes = p.y.as_bytes();
         unsafe {
             core::ptr::copy_nonoverlapping(bytes.as_ptr(), self.base_ptr.add(32), 32);
+        }
+    }
+
+    pub fn from_normal(p: AffinePointNormal) -> Self {
+        let mut serialized = [0u8; 64];
+        serialized[..32].copy_from_slice(&p.x.as_bytes());
+        serialized[32..].copy_from_slice(&p.y.as_bytes());
+
+        AffinePoint {
+            base_ptr: serialized.as_mut_ptr(),
         }
     }
 
@@ -146,11 +193,11 @@ pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
         b_decomp.resize(a_decomp.len(), false);
     }
     let max_len = a_decomp.len();
-    let mut temp_A = AffinePoint::from_edwards(*A);
-    let mut temp_B = AffinePoint::from_edwards(constants::ED25519_BASEPOINT_POINT);
+    let mut temp_A = AffinePointNormal::from_edwards(*A);
+    let mut temp_B = AffinePointNormal::from_edwards(constants::ED25519_BASEPOINT_POINT);
 
-    // TODO: replace `res` with the identity AffinePoint
-    let mut res = temp_A.clone();
+    let mut res = AffinePointNormal::from_edwards(EdwardsPoint::identity());
+
     for bit in 0..max_len {
         if a_decomp[bit] == true {
             res.add_assign(&temp_A);
@@ -161,57 +208,85 @@ pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
         temp_A.double();
         temp_B.double();
     }
-    return res.to_edwards();
+    res.to_edwards()
 }
+
+// pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
+//     let mut a_decomp: Vec<bool> = a.bits_le().collect();
+//     let mut b_decomp: Vec<bool> = b.bits_le().collect();
+//     if a_decomp.len() < b_decomp.len() {
+//         a_decomp.resize(b_decomp.len(), false);
+//     } else {
+//         b_decomp.resize(a_decomp.len(), false);
+//     }
+//     let max_len = a_decomp.len();
+//     let mut temp_A = AffinePoint::from_edwards(*A);
+//     let mut temp_B = AffinePoint::from_edwards(constants::ED25519_BASEPOINT_POINT);
+
+//     let mut res = AffinePoint::from_edwards(EdwardsPoint::identity());
+
+//     for bit in 0..max_len {
+//         if a_decomp[bit] == true {
+//             res.add_assign(&temp_A);
+//         }
+//         if b_decomp[bit] == true {
+//             res.add_assign(&temp_B);
+//         }
+//         temp_A.double();
+//         temp_B.double();
+//     }
+//     return res.to_edwards();
+// }
 
 /// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
 pub fn mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
-    let a_naf = a.non_adjacent_form(5);
+    ecall_mul(a, A, b)
+    // let a_naf = a.non_adjacent_form(5);
 
-    #[cfg(feature = "precomputed-tables")]
-    let b_naf = b.non_adjacent_form(8);
-    #[cfg(not(feature = "precomputed-tables"))]
-    let b_naf = b.non_adjacent_form(5);
+    // #[cfg(feature = "precomputed-tables")]
+    // let b_naf = b.non_adjacent_form(8);
+    // #[cfg(not(feature = "precomputed-tables"))]
+    // let b_naf = b.non_adjacent_form(5);
 
-    // Find starting index
-    let mut i: usize = 255;
-    for j in (0..256).rev() {
-        i = j;
-        if a_naf[i] != 0 || b_naf[i] != 0 {
-            break;
-        }
-    }
+    // // Find starting index
+    // let mut i: usize = 255;
+    // for j in (0..256).rev() {
+    //     i = j;
+    //     if a_naf[i] != 0 || b_naf[i] != 0 {
+    //         break;
+    //     }
+    // }
 
-    let table_A = NafLookupTable5::<ProjectiveNielsPoint>::from(A);
-    #[cfg(feature = "precomputed-tables")]
-    let table_B = &constants::AFFINE_ODD_MULTIPLES_OF_BASEPOINT;
-    #[cfg(not(feature = "precomputed-tables"))]
-    let table_B =
-        &NafLookupTable5::<ProjectiveNielsPoint>::from(&constants::ED25519_BASEPOINT_POINT);
+    // let table_A = NafLookupTable5::<ProjectiveNielsPoint>::from(A);
+    // #[cfg(feature = "precomputed-tables")]
+    // let table_B = &constants::AFFINE_ODD_MULTIPLES_OF_BASEPOINT;
+    // #[cfg(not(feature = "precomputed-tables"))]
+    // let table_B =
+    //     &NafLookupTable5::<ProjectiveNielsPoint>::from(&constants::ED25519_BASEPOINT_POINT);
 
-    let mut r = ProjectivePoint::identity();
-    loop {
-        let mut t = r.double();
+    // let mut r = ProjectivePoint::identity();
+    // loop {
+    //     let mut t = r.double();
 
-        match a_naf[i].cmp(&0) {
-            Ordering::Greater => t = &t.as_extended() + &table_A.select(a_naf[i] as usize),
-            Ordering::Less => t = &t.as_extended() - &table_A.select(-a_naf[i] as usize),
-            Ordering::Equal => {}
-        }
+    //     match a_naf[i].cmp(&0) {
+    //         Ordering::Greater => t = &t.as_extended() + &table_A.select(a_naf[i] as usize),
+    //         Ordering::Less => t = &t.as_extended() - &table_A.select(-a_naf[i] as usize),
+    //         Ordering::Equal => {}
+    //     }
 
-        match b_naf[i].cmp(&0) {
-            Ordering::Greater => t = &t.as_extended() + &table_B.select(b_naf[i] as usize),
-            Ordering::Less => t = &t.as_extended() - &table_B.select(-b_naf[i] as usize),
-            Ordering::Equal => {}
-        }
+    //     match b_naf[i].cmp(&0) {
+    //         Ordering::Greater => t = &t.as_extended() + &table_B.select(b_naf[i] as usize),
+    //         Ordering::Less => t = &t.as_extended() - &table_B.select(-b_naf[i] as usize),
+    //         Ordering::Equal => {}
+    //     }
 
-        r = t.as_projective();
+    //     r = t.as_projective();
 
-        if i == 0 {
-            break;
-        }
-        i -= 1;
-    }
+    //     if i == 0 {
+    //         break;
+    //     }
+    //     i -= 1;
+    // }
 
-    r.as_extended()
+    // r.as_extended()
 }
