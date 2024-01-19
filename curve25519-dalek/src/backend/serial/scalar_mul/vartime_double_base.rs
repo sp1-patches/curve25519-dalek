@@ -22,8 +22,7 @@ use crate::window::NafLookupTable5;
 use alloc::vec::Vec;
 
 struct AffinePoint {
-    x: FieldElement,
-    y: FieldElement,
+    base_ptr: *const u8,
 }
 
 impl EdwardsPoint {
@@ -32,18 +31,24 @@ impl EdwardsPoint {
         let x_affine = &self.X * &z_inv;
         let y_affine = &self.Y * &z_inv;
 
+        let mut serialized = [0u8; 64];
+        serialized[..32].copy_from_slice(&x_affine.as_bytes());
+        serialized[32..].copy_from_slice(&y_affine.as_bytes());
+
         AffinePoint {
-            x: x_affine,
-            y: y_affine,
+            base_ptr: serialized.as_ptr(),
         }
     }
 }
 
 impl Clone for AffinePoint {
     fn clone(&self) -> Self {
+        let mut serialized = [0u8; 64];
+        unsafe {
+            core::ptr::copy_nonoverlapping(self.base_ptr, serialized.as_mut_ptr(), 64);
+        }
         AffinePoint {
-            x: self.x.clone(),
-            y: self.y.clone(),
+            base_ptr: serialized.as_ptr(),
         }
     }
 }
@@ -60,11 +65,21 @@ impl AffinePoint {
     }
 
     pub fn to_edwards(&self) -> EdwardsPoint {
+        let mut bytes: [u8; 32] = [0u8; 32];
+        unsafe {
+            core::ptr::copy_nonoverlapping(self.base_ptr, bytes.as_mut_ptr(), 32);
+        }
+        let x = FieldElement::from_bytes(&bytes);
+        unsafe {
+            core::ptr::copy_nonoverlapping(self.base_ptr.add(32), bytes.as_mut_ptr(), 32);
+        }
+        let y = FieldElement::from_bytes(&bytes);
+
         EdwardsPoint {
-            X: self.x,
-            Y: self.y,
+            X: x,
+            Y: y,
             Z: FieldElement::ONE,
-            T: &self.x * &self.y,
+            T: &x * &y,
         }
     }
 }
@@ -80,6 +95,8 @@ pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
     let max_len = a_decomp.len();
     let mut temp_A = A.to_affine();
     let mut temp_B = constants::ED25519_BASEPOINT_POINT.to_affine();
+
+    // TODO: replace `res` with the identity AffinePoint
     let mut res = temp_A.clone();
     for bit in 0..max_len {
         if a_decomp[bit] == true {
