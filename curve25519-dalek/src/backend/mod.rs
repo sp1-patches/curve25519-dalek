@@ -34,6 +34,8 @@
 //! The [`vector`] backend is selected by the `simd_backend` cargo
 //! feature; it uses the [`serial`] backend for non-vectorized operations.
 
+use core::panic;
+
 use crate::EdwardsPoint;
 use crate::Scalar;
 

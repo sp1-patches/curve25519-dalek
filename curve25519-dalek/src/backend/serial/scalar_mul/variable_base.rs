@@ -9,6 +9,7 @@ use crate::window::LookupTable;
 /// Perform constant-time, variable-base scalar multiplication.
 #[rustfmt::skip] // keep alignment of explanatory comments
 pub(crate) fn mul(point: &EdwardsPoint, scalar: &Scalar) -> EdwardsPoint {
+    panic!("using variable_base::mul");
     // Construct a lookup table of [P,2P,3P,4P,5P,6P,7P,8P]
     let lookup_table = LookupTable::<ProjectiveNielsPoint>::from(point);
     // Setting s = scalar, compute
