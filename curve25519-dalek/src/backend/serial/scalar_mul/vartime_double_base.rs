@@ -21,20 +21,9 @@ use crate::traits::Identity;
 use crate::window::NafLookupTable5;
 use alloc::vec::Vec;
 
+#[derive(Clone)]
 struct AffinePoint {
-    base_ptr: *mut u8,
-}
-
-impl Clone for AffinePoint {
-    fn clone(&self) -> Self {
-        let mut serialized = [0u8; 64];
-        unsafe {
-            core::ptr::copy_nonoverlapping(self.base_ptr, serialized.as_mut_ptr(), 64);
-        }
-        AffinePoint {
-            base_ptr: serialized.as_mut_ptr(),
-        }
-    }
+    bytes: [u8; 64],
 }
 
 struct AffinePointNormal {
@@ -43,7 +32,7 @@ struct AffinePointNormal {
 }
 
 impl AffinePointNormal {
-    pub fn add_assign(&self, other: &AffinePointNormal) -> AffinePointNormal {
+    pub fn add_assign(&mut self, other: &AffinePointNormal) {
         let x1 = self.x;
         let x2 = other.x;
         let y1 = self.y;
@@ -57,7 +46,7 @@ impl AffinePointNormal {
         let x3 = &x3_numerator * &(&FieldElement::ONE + &d_mul_f).invert();
         let y3 = &y3_numerator * &(&FieldElement::ONE - &d_mul_f).invert();
 
-        AffinePointNormal { x: x3, y: y3 }
+        *self = AffinePointNormal { x: x3, y: y3 };
     }
 
     pub fn from_edwards(p: EdwardsPoint) -> Self {
@@ -100,87 +89,50 @@ impl AffinePointNormal {
 
 impl AffinePoint {
     pub fn from_edwards(p: EdwardsPoint) -> Self {
-        let z_inv = p.Z.invert(); // Assuming FieldElement has an invert method
-        let x_affine = &p.X * &z_inv;
-        let y_affine = &p.Y * &z_inv;
-
-        let mut serialized = [0u8; 64];
-        serialized[..32].copy_from_slice(&x_affine.as_bytes());
-        serialized[32..].copy_from_slice(&y_affine.as_bytes());
-
-        AffinePoint {
-            base_ptr: serialized.as_mut_ptr(),
-        }
+        Self::from_normal(AffinePointNormal::from_edwards(p))
     }
 
     pub fn set_normal(&mut self, p: AffinePointNormal) {
-        let bytes = p.x.as_bytes();
-        unsafe {
-            core::ptr::copy_nonoverlapping(bytes.as_ptr(), self.base_ptr, 32);
-        }
-        let bytes = p.y.as_bytes();
-        unsafe {
-            core::ptr::copy_nonoverlapping(bytes.as_ptr(), self.base_ptr.add(32), 32);
-        }
+        self.bytes[..32].copy_from_slice(&p.x.as_bytes());
+        self.bytes[32..].copy_from_slice(&p.y.as_bytes());
     }
 
     pub fn from_normal(p: AffinePointNormal) -> Self {
-        let mut serialized = [0u8; 64];
-        serialized[..32].copy_from_slice(&p.x.as_bytes());
-        serialized[32..].copy_from_slice(&p.y.as_bytes());
+        let mut bytes = [0u8; 64];
+        bytes[..32].copy_from_slice(&p.x.as_bytes());
+        bytes[32..].copy_from_slice(&p.y.as_bytes());
 
-        AffinePoint {
-            base_ptr: serialized.as_mut_ptr(),
-        }
+        AffinePoint { bytes }
     }
 
     pub fn to_normal(&self) -> AffinePointNormal {
-        let mut bytes: [u8; 32] = [0u8; 32];
-        unsafe {
-            core::ptr::copy_nonoverlapping(self.base_ptr, bytes.as_mut_ptr(), 32);
-        }
-        let x = FieldElement::from_bytes(&bytes);
-        unsafe {
-            core::ptr::copy_nonoverlapping(self.base_ptr.add(32), bytes.as_mut_ptr(), 32);
-        }
-        let y = FieldElement::from_bytes(&bytes);
-
+        let mut x_bytes = [0u8; 32];
+        x_bytes.copy_from_slice(&self.bytes[..32]);
+        let x = FieldElement::from_bytes(&x_bytes);
+        let mut y_bytes = [0u8; 32];
+        y_bytes.copy_from_slice(&self.bytes[32..]);
+        let y = FieldElement::from_bytes(&y_bytes);
         AffinePointNormal { x, y }
     }
 
     // TODO implement Add with another AffinePoint
     pub fn add_assign(&mut self, other: &AffinePoint) {
-        let a = self.to_normal();
+        let mut a = self.to_normal();
         let b = other.to_normal();
-        let c = a.add_assign(&b);
-        self.set_normal(c);
+        a.add_assign(&b);
+        self.set_normal(a);
         // ecall to ed_add
     }
 
     pub fn double(&mut self) {
-        let a = self.to_normal();
-        let b = a.add_assign(&a);
-        self.set_normal(b);
+        let mut a = self.to_normal();
+        a.double();
+        self.set_normal(a);
         // ecall to ed_double
     }
 
     pub fn to_edwards(&self) -> EdwardsPoint {
-        let mut bytes: [u8; 32] = [0u8; 32];
-        unsafe {
-            core::ptr::copy_nonoverlapping(self.base_ptr, bytes.as_mut_ptr(), 32);
-        }
-        let x = FieldElement::from_bytes(&bytes);
-        unsafe {
-            core::ptr::copy_nonoverlapping(self.base_ptr.add(32), bytes.as_mut_ptr(), 32);
-        }
-        let y = FieldElement::from_bytes(&bytes);
-
-        EdwardsPoint {
-            X: x,
-            Y: y,
-            Z: FieldElement::ONE,
-            T: &x * &y,
-        }
+        self.to_normal().to_edwards()
     }
 }
 
@@ -193,10 +145,10 @@ pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
         b_decomp.resize(a_decomp.len(), false);
     }
     let max_len = a_decomp.len();
-    let mut temp_A = AffinePointNormal::from_edwards(*A);
-    let mut temp_B = AffinePointNormal::from_edwards(constants::ED25519_BASEPOINT_POINT);
+    let mut temp_A = AffinePoint::from_edwards(*A);
+    let mut temp_B = AffinePoint::from_edwards(constants::ED25519_BASEPOINT_POINT);
 
-    let mut res = AffinePointNormal::from_edwards(EdwardsPoint::identity());
+    let mut res = AffinePoint::from_edwards(EdwardsPoint::identity());
 
     for bit in 0..max_len {
         if a_decomp[bit] == true {
