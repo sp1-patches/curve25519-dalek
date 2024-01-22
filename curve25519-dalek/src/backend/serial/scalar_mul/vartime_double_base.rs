@@ -87,6 +87,10 @@ impl AffinePointNormal {
     }
 }
 
+extern "C" {
+    fn syscall_ed_add(p: *mut u32, q: *const u32);
+}
+
 impl AffinePoint {
     pub fn from_edwards(p: EdwardsPoint) -> Self {
         Self::from_normal(AffinePointNormal::from_edwards(p))
@@ -121,7 +125,15 @@ impl AffinePoint {
         let b = other.to_normal();
         a.add_assign(&b);
         self.set_normal(a);
+
         // ecall to ed_add
+
+        // let p_ptr = self.bytes.as_mut_ptr() as *mut u32;
+        // let q_ptr = other.bytes.as_ptr() as *const u32;
+
+        // unsafe {
+        //     syscall_ed_add(p_ptr, q_ptr);
+        // }
     }
 
     pub fn double(&mut self) {
@@ -160,6 +172,7 @@ pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
         temp_A.double();
         temp_B.double();
     }
+
     res.to_edwards()
 }
 
@@ -192,7 +205,8 @@ pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
 
 /// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
 pub fn mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
-    ecall_mul(a, A, b)
+    // ecall_mul(a, A, b)
+    EdwardsPoint::identity()
     // let a_naf = a.non_adjacent_form(5);
 
     // #[cfg(feature = "precomputed-tables")]
