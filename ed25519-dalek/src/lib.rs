@@ -237,7 +237,7 @@
 //! # }
 //! ```
 
-#![no_std]
+// #![no_std]
 #![warn(future_incompatible, rust_2018_idioms)]
 #![deny(missing_docs)] // refuse to compile if documentation is missing
 #![deny(clippy::unwrap_used)] // don't allow unwrap

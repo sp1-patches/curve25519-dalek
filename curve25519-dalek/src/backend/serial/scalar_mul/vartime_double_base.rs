@@ -121,26 +121,32 @@ impl AffinePoint {
 
     // TODO implement Add with another AffinePoint
     pub fn add_assign(&mut self, other: &AffinePoint) {
-        let mut a = self.to_normal();
-        let b = other.to_normal();
-        a.add_assign(&b);
-        self.set_normal(a);
+        // let mut a = self.to_normal();
+        // let b = other.to_normal();
+        // a.add_assign(&b);
+        // self.set_normal(a);
 
         // ecall to ed_add
 
-        // let p_ptr = self.bytes.as_mut_ptr() as *mut u32;
-        // let q_ptr = other.bytes.as_ptr() as *const u32;
+        let p_ptr = self.bytes.as_mut_ptr() as *mut u32;
+        let q_ptr = other.bytes.as_ptr() as *const u32;
 
-        // unsafe {
-        //     syscall_ed_add(p_ptr, q_ptr);
-        // }
+        unsafe {
+            syscall_ed_add(p_ptr, q_ptr);
+        }
     }
 
     pub fn double(&mut self) {
-        let mut a = self.to_normal();
-        a.double();
-        self.set_normal(a);
+        // let mut a = self.to_normal();
+        // a.double();
+        // self.set_normal(a);
+
         // ecall to ed_double
+        let p_ptr = self.bytes.as_mut_ptr() as *mut u32;
+
+        unsafe {
+            syscall_ed_add(p_ptr, p_ptr);
+        }
     }
 
     pub fn to_edwards(&self) -> EdwardsPoint {
@@ -151,6 +157,8 @@ impl AffinePoint {
 pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
     let mut a_decomp: Vec<bool> = a.bits_le().collect();
     let mut b_decomp: Vec<bool> = b.bits_le().collect();
+    println!("a_len: {}", a_decomp.len());
+    println!("b_len: {}", b_decomp.len());
     if a_decomp.len() < b_decomp.len() {
         a_decomp.resize(b_decomp.len(), false);
     } else {
@@ -161,6 +169,9 @@ pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
     let mut temp_B = AffinePoint::from_edwards(constants::ED25519_BASEPOINT_POINT);
 
     let mut res = AffinePoint::from_edwards(EdwardsPoint::identity());
+
+    println!("temp_A: {:?}", temp_A.bytes);
+    println!("temp_B: {:?}", temp_B.bytes);
 
     for bit in 0..max_len {
         if a_decomp[bit] == true {
@@ -205,8 +216,10 @@ pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
 
 /// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
 pub fn mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
-    // ecall_mul(a, A, b)
-    EdwardsPoint::identity()
+    ecall_mul(a, A, b)
+
+    // EdwardsPoint::identity()
+
     // let a_naf = a.non_adjacent_form(5);
 
     // #[cfg(feature = "precomputed-tables")]

@@ -13,6 +13,7 @@ use core::convert::TryFrom;
 use core::fmt::Debug;
 use core::hash::{Hash, Hasher};
 
+use curve25519_dalek::traits::Identity;
 use curve25519_dalek::{
     digest::{generic_array::typenum::U64, Digest},
     edwards::{CompressedEdwardsY, EdwardsPoint},
@@ -406,15 +407,15 @@ impl VerifyingKey {
     ) -> Result<(), SignatureError> {
         let signature = InternalSignature::try_from(signature)?;
 
-        let signature_R = signature
-            .R
-            .decompress()
-            .ok_or_else(|| SignatureError::from(InternalError::Verify))?;
+        // // let signature_R = signature
+        // //     .R
+        // //     .decompress()
+        // //     .ok_or_else(|| SignatureError::from(InternalError::Verify))?;
 
-        // Logical OR is fine here as we're not trying to be constant time.
-        if signature_R.is_small_order() || self.point.is_small_order() {
-            return Err(InternalError::Verify.into());
-        }
+        // // Logical OR is fine here as we're not trying to be constant time.
+        // // if signature_R.is_small_order() || self.point.is_small_order() {
+        // //     return Err(InternalError::Verify.into());
+        // // }
 
         let expected_R = self.recompute_R::<Sha512>(None, &signature, message);
         if expected_R == signature.R {
