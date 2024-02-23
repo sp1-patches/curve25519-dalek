@@ -157,8 +157,6 @@ impl AffinePoint {
 pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
     let mut a_decomp: Vec<bool> = a.bits_le().collect();
     let mut b_decomp: Vec<bool> = b.bits_le().collect();
-    println!("a_len: {}", a_decomp.len());
-    println!("b_len: {}", b_decomp.len());
     if a_decomp.len() < b_decomp.len() {
         a_decomp.resize(b_decomp.len(), false);
     } else {
@@ -169,9 +167,6 @@ pub fn ecall_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
     let mut temp_B = AffinePoint::from_edwards(constants::ED25519_BASEPOINT_POINT);
 
     let mut res = AffinePoint::from_edwards(EdwardsPoint::identity());
-
-    println!("temp_A: {:?}", temp_A.bytes);
-    println!("temp_B: {:?}", temp_B.bytes);
 
     for bit in 0..max_len {
         if a_decomp[bit] == true {
