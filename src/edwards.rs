@@ -166,13 +166,13 @@ cfg_if::cfg_if! {
                 // Convert the x and y coordinates to little endian u32 limbs.
                 for (x_limb, x_bytes) in limbs[..8]
                     .iter_mut()
-                    .zip(value.X.as_bytes().chunks_exact(4))
+                    .zip(value.X.to_bytes().chunks_exact(4))
                 {
                     *x_limb = u32::from_le_bytes(x_bytes.try_into().unwrap());
                 }
                 for (y_limb, y_bytes) in limbs[8..]
                     .iter_mut()
-                    .zip(value.Y.as_bytes().chunks_exact(4))
+                    .zip(value.Y.to_bytes().chunks_exact(4))
                 {
                     *y_limb = u32::from_le_bytes(y_bytes.try_into().unwrap());
                 }

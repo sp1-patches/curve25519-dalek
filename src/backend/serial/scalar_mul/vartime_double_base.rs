@@ -17,6 +17,7 @@ use edwards::EdwardsPoint;
 use backend::serial::curve_models::{ProjectiveNielsPoint, ProjectivePoint};
 use window::NafLookupTable5;
 use prelude::Vec;
+use constants::ED25519_BASEPOINT_POINT;
 
 #[cfg(not(all(target_os = "zkvm", target_vendor = "succinct")))]
 /// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
