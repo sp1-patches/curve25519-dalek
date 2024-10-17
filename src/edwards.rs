@@ -267,7 +267,7 @@ impl CompressedEdwardsY {
         }
         let X = FieldElement::from_bytes(&XY_bytes[0..32].try_into().unwrap());
         let Y = FieldElement::from_bytes(&XY_bytes[32..].try_into().unwrap());
-        let Z = FieldElement::ONE;
+        let Z = FieldElement::one();
         return Some(EdwardsPoint {
             X,
             Y,
