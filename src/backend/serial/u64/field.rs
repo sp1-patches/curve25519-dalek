@@ -251,6 +251,13 @@ impl ConditionallySelectable for FieldElement51 {
 }
 
 impl FieldElement51 {
+    pub(crate) const fn from_limbs(limbs: [u64; 5]) -> FieldElement51 {
+        FieldElement51(limbs)
+    }
+    
+     /// The scalar \\( 1 \\).
+     pub const ONE: FieldElement51 = FieldElement51::from_limbs([1, 0, 0, 0, 0]);
+     
     /// Invert the sign of this field element
     pub fn negate(&mut self) {
         // See commentary in the Sub impl

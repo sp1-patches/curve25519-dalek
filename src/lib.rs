@@ -269,6 +269,9 @@ extern crate zeroize;
 #[cfg(any(feature = "fiat_u64_backend", feature = "fiat_u32_backend"))]
 extern crate fiat_crypto;
 
+#[cfg(all(target_os = "zkvm", target_vendor = "succinct"))]
+extern crate sp1_lib;
+
 // Used for traits related to constant-time code.
 extern crate subtle;
 
