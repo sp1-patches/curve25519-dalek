@@ -821,6 +821,16 @@ impl Scalar {
         ret
     }
 
+    /// Get the bits of the scalar, in little-endian order
+    pub(crate) fn bits_le(&self) -> impl DoubleEndedIterator<Item = bool> + '_ {
+        (0..256).map(move |i| {
+            // As i runs from 0..256, the bottom 3 bits index the bit, while the upper bits index
+            // the byte. Since self.bytes is little-endian at the byte level, this iterator is
+            // little-endian on the bit level
+            ((self.bytes[i >> 3] >> (i & 7)) & 1u8) == 1
+        })
+    }
+
     /// Get the bits of the scalar.
     pub(crate) fn bits(&self) -> [i8; 256] {
         let mut bits = [0i8; 256];
