@@ -836,14 +836,23 @@ impl Scalar {
         ret
     }
 
+    fn get_bit_le(&self, i: usize) -> bool {
+        ((self.bytes[i >> 3] >> (i & 7)) & 1u8) == 1
+    }
+
     /// Get the bits of the scalar, in little-endian order
     pub(crate) fn bits_le(&self) -> impl DoubleEndedIterator<Item = bool> + '_ {
-        (0..256).map(|i| {
-            // As i runs from 0..256, the bottom 3 bits index the bit, while the upper bits index
-            // the byte. Since self.bytes is little-endian at the byte level, this iterator is
-            // little-endian on the bit level
-            ((self.bytes[i >> 3] >> (i & 7)) & 1u8) == 1
-        })
+        (0..256).map(move |i| self.get_bit_le(i))
+    }
+
+    /// Get the bits of the scalar, in little-endian order, as an array
+    #[cfg(all(target_os = "zkvm", target_vendor = "succinct"))]
+    pub(crate) fn bits_le_array(&self) -> [bool; 256] {
+        let mut bits = [false; 256];
+        for i in 0..256 {
+            bits[i] = self.get_bit_le(i);
+        }
+        bits
     }
 
     /// Compute a width-\\(w\\) "Non-Adjacent Form" of this scalar.

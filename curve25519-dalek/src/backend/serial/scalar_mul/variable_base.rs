@@ -5,8 +5,6 @@ use crate::edwards::EdwardsPoint;
 use crate::scalar::Scalar;
 use crate::traits::Identity;
 use crate::window::LookupTable;
-use alloc::vec::Vec;
-use crate::constants::ED25519_BASEPOINT_POINT;
 
 #[cfg(not(all(target_os = "zkvm", target_vendor = "succinct")))]
 /// Perform constant-time, variable-base scalar multiplication.

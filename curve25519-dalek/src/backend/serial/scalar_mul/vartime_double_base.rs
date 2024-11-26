@@ -18,8 +18,10 @@ use crate::edwards::EdwardsPoint;
 use crate::scalar::Scalar;
 use crate::traits::Identity;
 use crate::window::NafLookupTable5;
-use alloc::vec::Vec;
+
+#[cfg(not(feature = "precomputed-tables"))]
 use crate::constants::ED25519_BASEPOINT_POINT;
+
 
 #[cfg(not(all(target_os = "zkvm", target_vendor = "succinct")))]
 /// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
@@ -84,15 +86,15 @@ use sp1_lib::{ed25519::Ed25519AffinePoint, utils::AffinePoint};
 pub fn mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
     let A: Ed25519AffinePoint = (*A).into();
 
-    let a_bits = a.bits_le().collect::<Vec<bool>>();
-    let b_bits = b.bits_le().collect::<Vec<bool>>();
+    let a_bits = a.bits_le_array();
+    let b_bits = b.bits_le_array();
 
     // Note: The base point is the identity point.
     let res = AffinePoint::multi_scalar_multiplication(
         &a_bits,
         A,
         &b_bits,
-        ED25519_BASEPOINT_POINT.into(),
+        crate::constants::ED25519_BASEPOINT_POINT.into(),
     )
     .unwrap();
     res.into()
