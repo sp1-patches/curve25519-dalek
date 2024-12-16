@@ -19,6 +19,11 @@ use crate::scalar::Scalar;
 use crate::traits::Identity;
 use crate::window::NafLookupTable5;
 
+#[cfg(not(feature = "precomputed-tables"))]
+use crate::constants::ED25519_BASEPOINT_POINT;
+
+
+#[cfg(not(all(target_os = "zkvm", target_vendor = "succinct")))]
 /// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
 pub fn mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
     let a_naf = a.non_adjacent_form(5);
@@ -69,4 +74,28 @@ pub fn mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
     }
 
     r.as_extended()
+}
+
+#[cfg(all(target_os = "zkvm", target_vendor = "succinct"))]
+use sp1_lib::{ed25519::Ed25519AffinePoint, utils::AffinePoint};
+#[cfg(all(target_os = "zkvm", target_vendor = "succinct"))]
+/// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
+///
+/// Accelerated with SP1's EdAdd syscall.
+#[allow(non_snake_case)]
+pub fn mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
+    let A: Ed25519AffinePoint = (*A).into();
+
+    let a_bits = a.bits_le_array();
+    let b_bits = b.bits_le_array();
+
+    // Note: The base point is the identity point.
+    let res = AffinePoint::multi_scalar_multiplication(
+        &a_bits,
+        A,
+        &b_bits,
+        crate::constants::ED25519_BASEPOINT_POINT.into(),
+    )
+    .unwrap();
+    res.into()
 }

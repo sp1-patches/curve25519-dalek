@@ -152,6 +152,49 @@ use crate::traits::MultiscalarMul;
 #[cfg(feature = "alloc")]
 use crate::traits::{VartimeMultiscalarMul, VartimePrecomputedMultiscalarMul};
 
+cfg_if::cfg_if! {
+    if #[cfg(all(target_os = "zkvm", target_vendor = "succinct"))] {
+        use sp1_lib::{ed25519::Ed25519AffinePoint, utils::AffinePoint, syscall_ed_decompress};
+        use core::convert::TryInto;
+
+        impl From<EdwardsPoint> for Ed25519AffinePoint {
+            fn from(value: EdwardsPoint) -> Self {
+                let mut limbs = [0u32; 16];
+
+                // Ensure that the point is normalized.
+                assert_eq!(value.Z, FieldElement::ONE);
+
+                // Convert the x and y coordinates to little endian u32 limbs.
+                for (x_limb, x_bytes) in limbs[..8]
+                    .iter_mut()
+                    .zip(value.X.as_bytes().chunks_exact(4))
+                {
+                    *x_limb = u32::from_le_bytes(x_bytes.try_into().unwrap());
+                }
+                for (y_limb, y_bytes) in limbs[8..]
+                    .iter_mut()
+                    .zip(value.Y.as_bytes().chunks_exact(4))
+                {
+                    *y_limb = u32::from_le_bytes(y_bytes.try_into().unwrap());
+                }
+
+                Self { 0: limbs }
+            }
+        }
+
+        impl From<Ed25519AffinePoint> for EdwardsPoint {
+            fn from(value: Ed25519AffinePoint) -> Self {
+                let le_bytes = value.to_le_bytes();
+                let x = FieldElement::from_bytes(&le_bytes[..32].try_into().unwrap());
+                let y = FieldElement::from_bytes(&le_bytes[32..].try_into().unwrap());
+                let t = &x * &y;
+
+                Self { X: x, Y: y, Z: FieldElement::ONE, T: t }
+            }
+        }
+    } 
+}
+
 // ------------------------------------------------------------------------
 // Compressed points
 // ------------------------------------------------------------------------
@@ -192,12 +235,60 @@ impl CompressedEdwardsY {
     /// Returns `None` if the input is not the \\(y\\)-coordinate of a
     /// curve point.
     pub fn decompress(&self) -> Option<EdwardsPoint> {
+        #[cfg(all(target_os = "zkvm", target_vendor = "succinct"))]
+        {
+            // Use a hook to see if we can decompress with the syscall.
+            //
+            // Our decompression syscall requires that the compressed point has a valid square
+            // y-coordinate.
+            //
+            // A malicious prover could try to use the syscall anyway, but the executor will
+            // panic, and the AIR cannot be satisfied.
+            sp1_lib::unconstrained! {
+                sp1_lib::io::write(sp1_lib::io::FD_EDDECOMPRESS, self.as_bytes()); 
+            }
+            
+            // Read the status of the hook.
+            //
+            // If the status is 1, the hook says we can use the syscall.
+            // Otherwise we must decompress the point "normally", to properly constrain the
+            // failure.
+            if sp1_lib::io::read_vec().first().expect("We should have a status from the hook") == &1 {
+                return Some(self.decompress_with_syscall());
+            }
+        }
+
         let (is_valid_y_coord, X, Y, Z) = decompress::step_1(self);
 
         if is_valid_y_coord.into() {
             Some(decompress::step_2(self, X, Y, Z))
         } else {
             None
+        }
+    }
+
+    #[cfg(all(target_os = "zkvm", target_vendor = "succinct"))]
+    /// Attempt to decompress to an `EdwardsPoint`.
+    ///
+    /// Returns `None` if the input is not the \\(y\\)-coordinate of a
+    /// curve point.
+    /// 
+    /// Accelerated with SP1's EdDecompress syscall.
+    fn decompress_with_syscall(&self) -> EdwardsPoint {
+        let mut XY_bytes = [0_u8; 64];
+        XY_bytes[32..].copy_from_slice(self.as_bytes());
+        unsafe {
+            syscall_ed_decompress(&mut XY_bytes);
+        }
+        let X = FieldElement::from_bytes(&XY_bytes[0..32].try_into().unwrap());
+        let Y = FieldElement::from_bytes(&XY_bytes[32..].try_into().unwrap());
+        let Z = FieldElement::ONE;
+
+        EdwardsPoint {
+            X,
+            Y,
+            Z,
+            T: &X * &Y,
         }
     }
 }
