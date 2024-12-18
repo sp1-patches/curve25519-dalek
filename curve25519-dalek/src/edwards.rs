@@ -59,7 +59,7 @@
 //! scalar multiplication;
 //!
 //! * an implementation of the
-//! [`MultiscalarMul`](../traits/trait.MultiscalarMul.html) trait for
+//! [`MultiscalarMul`](../traits/trait.MultiscalarMul.html) trait for/// The result is either `1` if the point is outside of the field order, 
 //! constant-time variable-base multiscalar multiplication;
 //!
 //! * an implementation of the
@@ -237,25 +237,91 @@ impl CompressedEdwardsY {
     pub fn decompress(&self) -> Option<EdwardsPoint> {
         #[cfg(all(target_os = "zkvm", target_vendor = "succinct"))]
         {
-            // Use a hook to see if we can decompress with the syscall.
-            //
-            // Our decompression syscall requires that the compressed point has a valid square
-            // y-coordinate.
-            //
-            // A malicious prover could try to use the syscall anyway, but the executor will
-            // panic, and the AIR cannot be satisfied.
+            /// A field element that is *not* a square in the field.
+            ///
+            /// This is useful becasue we want to prove that 
+            /// `u_div_v` is not a square which is the case when 
+            /// the point is not decompressable.
+            ///
+            /// If α is a generator and a and b are squares then are of the form 
+            /// a = α^2k and b = α^2k'.
+            ///
+            /// If a and b are are squares then a * b = α^2(k + k') is also a square
+            /// since sqrt(a * b) is α^(k + k').
+            ///
+            /// If a and b are not squares, they are of the form 
+            /// a = α^(2k + 1) and b = α^(2k' + 1) for some integers k and k'. 
+            /// Their product a * b = α^(2(k + k') + 2) = α^(2(k + k' + 1)) is a square,
+            /// because the exponent 2(k + k' + 1) is an even integer.
+            ///
+            /// todo!(n): this should be const, pending upstream.
+            let nqr: FieldElement = {
+                let mut nqr_bytes = [0u8; 32];
+                nqr_bytes[0] = 2;
+
+                FieldElement::from_bytes(&nqr_bytes)
+            };
+ 
+            let Y = FieldElement::from_bytes(self.as_bytes());
+            let Z = FieldElement::ONE;
+            let YY = Y.square();
+            let u = &YY - &Z;                            // u =  y²-1
+            let v = &(&YY * &constants::EDWARDS_D) + &Z; // v = dy²+1
+            
+            let mut buf = [0u8; 64];
+            buf[0..32].copy_from_slice(self.as_bytes());
+            buf[32..].copy_from_slice(&v.as_bytes());
+
+            // Use a hook to see if we can decompress with the syscall. 
             sp1_lib::unconstrained! {
-                sp1_lib::io::write(sp1_lib::io::FD_EDDECOMPRESS, self.as_bytes()); 
+                sp1_lib::io::write(sp1_lib::io::FD_EDDECOMPRESS, &buf); 
             }
             
             // Read the status of the hook.
             //
             // If the status is 1, the hook says we can use the syscall.
-            // Otherwise we must decompress the point "normally", to properly constrain the
-            // failure.
-            if sp1_lib::io::read_vec().first().expect("We should have a status from the hook") == &1 {
+            let status = sp1_lib::io::read_vec().first().cloned().expect("We should have a status from the hook");
+            if status == 1 {
                 return Some(self.decompress_with_syscall());
             }
+
+            assert!(Y.as_bytes()[31] >> 7 == 0, "High bit set");
+            assert!(self.as_bytes()[31] >> 7 == 0, "High bit set");
+            
+            /// This is the first assertion that the point is not decompressable.
+            ///
+            /// If the point is outside the field order, or has a non-canonical representation it cannot be decompressed.
+            /// Here `from_bytes` does the reduction.
+            ///
+            /// Note: This deviates from the original implentation, which didnt require canon
+            /// inputs.
+            if &Y.as_bytes() != self.as_bytes() {
+                // if we got here, than status is 0, and there is some auxillary data in the
+                // stream. We need to read it to clear the stream.
+                let _ = sp1_lib::io::read_vec();
+                let _ = sp1_lib::io::read_vec();
+
+                return None;                
+            }
+
+            // The hint indicated this point is not decompressable, and its not becasue of the
+            // previous reason.
+            //
+            // The other reason a decompression could fail is that the input
+            // has a `u/v` value that is not square.
+            //
+            // we check that by confirming that the hinted root satisfies 
+            // hinted_root * hinted_root = NQR * u_div_v
+            
+            let v_inv = read_and_verify_canon().unwrap();
+            assert!(&v_inv * &v == FieldElement::ONE, "The inverse of v is not correct. This is a bug.");
+
+            let hinted_root = read_and_verify_canon().unwrap();
+            
+            // Constrain `hinted_root * hinted_root = NQR * u_div_v`
+            assert_eq!(hinted_root.square(), &(&nqr * &u) * &v_inv, "The hinted root does not satisfy the NQR check. This is a bug.");
+
+            return None;
         }
 
         let (is_valid_y_coord, X, Y, Z) = decompress::step_1(self);
@@ -291,6 +357,18 @@ impl CompressedEdwardsY {
             T: &X * &Y,
         }
     }
+}
+
+fn read_and_verify_canon() -> Option<FieldElement> {
+    let raw_bytes: [u8; 32] = sp1_lib::io::read_vec().try_into().unwrap();
+    
+    let fe = FieldElement::from_bytes(&raw_bytes);
+
+    if fe.as_bytes() != raw_bytes {
+        return None;
+    }
+
+    Some(fe)
 }
 
 mod decompress {
