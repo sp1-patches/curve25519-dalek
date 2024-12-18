@@ -62,11 +62,8 @@ cpufeatures = "0.2.6"
 fiat-crypto = { version = "0.2.1", default-features = false }
 
 [target.'cfg(all(target_os = "zkvm", target_vendor = "succinct"))'.dependencies]
-sp1-lib = "4.0.0"
 anyhow = "1.0"
-
-[target.'cfg(all(target_os = "zkvm", target_vendor = "succinct"))'.patch.crate-io]
-sp1-lib = { git = "https://github.com/succinctlabs/sp1-wip", branch = "n/recent-patch-changes" }
+sp1-lib = { git = "https://github.com/succinctlabs/sp1-wip", branch = "n/ecdsa-refactor" }
 
 [features]
 default = ["alloc", "precomputed-tables", "zeroize"]
