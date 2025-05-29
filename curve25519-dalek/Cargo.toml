@@ -62,7 +62,7 @@ cpufeatures = "0.2.6"
 fiat-crypto = { version = "0.2.1", default-features = false }
 
 [target.'cfg(all(target_os = "zkvm", target_vendor = "succinct"))'.dependencies]
-sp1-lib = "4.0.0"
+sp1-lib = "5.0.0"
 
 [features]
 default = ["alloc", "precomputed-tables", "zeroize"]
