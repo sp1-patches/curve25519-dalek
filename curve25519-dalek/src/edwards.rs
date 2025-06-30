@@ -59,7 +59,7 @@
 //! scalar multiplication;
 //!
 //! * an implementation of the
-//! [`MultiscalarMul`](../traits/trait.MultiscalarMul.html) trait for/// The result is either `1` if the point is outside of the field order, 
+//! [`MultiscalarMul`](../traits/trait.MultiscalarMul.html) trait for/// The result is either `1` if the point is outside of the field order,
 //! constant-time variable-base multiscalar multiplication;
 //!
 //! * an implementation of the
@@ -159,7 +159,7 @@ cfg_if::cfg_if! {
 
         impl From<EdwardsPoint> for Ed25519AffinePoint {
             fn from(value: EdwardsPoint) -> Self {
-                let mut limbs = [0u32; 16];
+                let mut limbs = [0u64; 8];
 
                 // Invert `Z` inside an unconstrained block to normalize the point.
                 sp1_lib::unconstrained! {
@@ -176,17 +176,17 @@ cfg_if::cfg_if! {
                 let value_y = &value.Y * &z_inv;
 
                 // Convert the x and y coordinates to little endian u32 limbs.
-                for (x_limb, x_bytes) in limbs[..8]
+                for (x_limb, x_bytes) in limbs[..4]
                     .iter_mut()
-                    .zip(value_x.as_bytes().chunks_exact(4))
+                    .zip(value_x.as_bytes().chunks_exact(8))
                 {
-                    *x_limb = u32::from_le_bytes(x_bytes.try_into().unwrap());
+                    *x_limb = u64::from_le_bytes(x_bytes.try_into().unwrap());
                 }
-                for (y_limb, y_bytes) in limbs[8..]
+                for (y_limb, y_bytes) in limbs[4..]
                     .iter_mut()
-                    .zip(value_y.as_bytes().chunks_exact(4))
+                    .zip(value_y.as_bytes().chunks_exact(8))
                 {
-                    *y_limb = u32::from_le_bytes(y_bytes.try_into().unwrap());
+                    *y_limb = u64::from_le_bytes(y_bytes.try_into().unwrap());
                 }
 
                 Self { 0: limbs }
@@ -203,7 +203,7 @@ cfg_if::cfg_if! {
                 Self { X: x, Y: y, Z: FieldElement::ONE, T: t }
             }
         }
-    } 
+    }
 }
 
 // ------------------------------------------------------------------------
@@ -252,18 +252,18 @@ impl CompressedEdwardsY {
         {
             // A field element that is *not* a square in the field.
             //
-            // This is useful becasue we want to prove that 
-            // `u_div_v` is not a square which is the case when 
+            // This is useful becasue we want to prove that
+            // `u_div_v` is not a square which is the case when
             // the point is not decompressable.
             //
-            // If α is a generator and a and b are squares then are of the form 
+            // If α is a generator and a and b are squares then are of the form
             // a = α^2k and b = α^2k'.
             //
             // If a and b are are squares then a * b = α^2(k + k') is also a square
             // since sqrt(a * b) is α^(k + k').
             //
-            // If a and b are not squares, they are of the form 
-            // a = α^(2k + 1) and b = α^(2k' + 1) for some integers k and k'. 
+            // If a and b are not squares, they are of the form
+            // a = α^(2k + 1) and b = α^(2k' + 1) for some integers k and k'.
             // Their product a * b = α^(2(k + k') + 2) = α^(2(k + k' + 1)) is a square,
             // because the exponent 2(k + k' + 1) is an even integer.
             //
@@ -274,30 +274,33 @@ impl CompressedEdwardsY {
 
                 FieldElement::from_bytes(&nqr_bytes)
             };
- 
+
             let Y = FieldElement::from_bytes(self.as_bytes());
             let Z = FieldElement::ONE;
             let YY = Y.square();
-            let u = &YY - &Z;                            // u =  y²-1
+            let u = &YY - &Z; // u =  y²-1
             let v = &(&YY * &constants::EDWARDS_D) + &Z; // v = dy²+1
-            
+
             let mut buf = [0u8; 64];
             buf[0..32].copy_from_slice(self.as_bytes());
             buf[32..].copy_from_slice(&v.as_bytes());
 
-            // Use a hook to see if we can decompress with the syscall. 
+            // Use a hook to see if we can decompress with the syscall.
             sp1_lib::unconstrained! {
-                sp1_lib::io::write(sp1_lib::io::FD_EDDECOMPRESS, &buf); 
+                sp1_lib::io::write(sp1_lib::io::FD_EDDECOMPRESS, &buf);
             }
-            
+
             // Read the status of the hook.
             //
             // If the status is 1, the hook says we can use the syscall.
-            let status = sp1_lib::io::read_vec().first().cloned().expect("We should have a status from the hook");
+            let status = sp1_lib::io::read_vec()
+                .first()
+                .cloned()
+                .expect("We should have a status from the hook");
             if status == 1 {
                 return Some(self.decompress_with_syscall());
             }
-            
+
             // This is the first assertion that the point is not decompressable.
             //
             // If the point is outside the field and has a non-canonical representation it cannot be decompressed.
@@ -312,7 +315,7 @@ impl CompressedEdwardsY {
 
             // Here the compressed form without the sign bit is compared with `Y`'s `as_bytes()`, which returns the canonical form
             if Y.as_bytes() != masked {
-                return None;                
+                return None;
             }
 
             // The hint indicated this point is not decompressable, and its not becasue of the
@@ -321,19 +324,26 @@ impl CompressedEdwardsY {
             // The other reason a decompression could fail is that the input
             // has a `u/v` value that is not square.
             //
-            // we check that by confirming that the hinted root satisfies 
+            // we check that by confirming that the hinted root satisfies
             // hinted_root * hinted_root = NQR * u_div_v
 
             // v_inv is checked to be canonical and a correct inverse.
             let v_inv = read_and_verify_canon().unwrap();
-            assert!(&v_inv * &v == FieldElement::ONE, "The inverse of v is not correct. This is a bug.");
-            
+            assert!(
+                &v_inv * &v == FieldElement::ONE,
+                "The inverse of v is not correct. This is a bug."
+            );
+
             // Hinted root is checked to be canonical and non-zero.
             let hinted_root = read_and_verify_canon().unwrap();
             assert!(!bool::from(hinted_root.is_zero()));
-            
+
             // Constrain `hinted_root * hinted_root = NQR * u_div_v`
-            assert_eq!(hinted_root.square(), &(&nqr * &u) * &v_inv, "The hinted root does not satisfy the NQR check. This is a bug.");
+            assert_eq!(
+                hinted_root.square(),
+                &(&nqr * &u) * &v_inv,
+                "The hinted root does not satisfy the NQR check. This is a bug."
+            );
 
             return None;
         }
@@ -352,7 +362,7 @@ impl CompressedEdwardsY {
     ///
     /// Returns `None` if the input is not the \\(y\\)-coordinate of a
     /// curve point.
-    /// 
+    ///
     /// Accelerated with SP1's EdDecompress syscall.
     fn decompress_with_syscall(&self) -> EdwardsPoint {
         let mut XY_bytes = [0_u8; 64];
@@ -376,7 +386,7 @@ impl CompressedEdwardsY {
 #[cfg(all(target_os = "zkvm", target_vendor = "succinct"))]
 fn read_and_verify_canon() -> Option<FieldElement> {
     let raw_bytes: [u8; 32] = sp1_lib::io::read_vec().try_into().unwrap();
-    
+
     let fe = FieldElement::from_bytes(&raw_bytes);
 
     // Check that the read hint is canonical.
