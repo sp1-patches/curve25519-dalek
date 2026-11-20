@@ -247,8 +247,6 @@ impl CompressedEdwardsY {
     ///
     /// Returns `None` if the input is not the \\(y\\)-coordinate of a
     /// curve point.
-    /// NOTE: In the patched version, the decompress fails when the `y` coordinate is not canonical, i.e. not less than the field modulus.
-    /// In the original crate, the decompress succeeds even when the `y` coordinate is not canonical, between `2^255 - 19` and `2^255 - 1`.
     pub fn decompress(&self) -> Option<EdwardsPoint> {
         #[cfg(all(target_os = "zkvm", target_vendor = "succinct"))]
         {
@@ -283,8 +281,14 @@ impl CompressedEdwardsY {
             let u = &YY - &Z; // u =  y²-1
             let v = &(&YY * &constants::EDWARDS_D) + &Z; // v = dy²+1
 
+            // The precompile requires canonical Y. Reduce only the decoded coordinate
+            // and retain the sign bit. Keep the caller's encoded bytes unchanged.
+            let mut canonical_bytes = Y.as_bytes();
+            canonical_bytes[31] |= self.as_bytes()[31] & 0x80;
+            let canonical = CompressedEdwardsY(canonical_bytes);
+
             let mut buf = [0u8; 64];
-            buf[0..32].copy_from_slice(self.as_bytes());
+            buf[0..32].copy_from_slice(canonical.as_bytes());
             buf[32..].copy_from_slice(&v.as_bytes());
 
             // Use a hook to see if we can decompress with the syscall.
@@ -300,34 +304,11 @@ impl CompressedEdwardsY {
                 .cloned()
                 .expect("We should have a status from the hook");
             if status == 1 {
-                return Some(self.decompress_with_syscall());
+                return Some(canonical.decompress_with_syscall());
             }
 
-            // This is the first assertion that the point is not decompressable.
-            //
-            // If the point is outside the field and has a non-canonical representation it cannot be decompressed.
-            // Here Y is created via `from_bytes` which does the reduction.
-            //
-            // Note: This deviates from the original implentation, which didnt require canon
-            // inputs.
-            //
-            // Mask the sign bit.
-            let mut masked = self.to_bytes();
-            masked[31] &= 0b0111_1111;
-
-            // Here the compressed form without the sign bit is compared with `Y`'s `as_bytes()`, which returns the canonical form
-            if Y.as_bytes() != masked {
-                return None;
-            }
-
-            // The hint indicated this point is not decompressable, and its not becasue of the
-            // previous reason.
-            //
-            // The other reason a decompression could fail is that the input
-            // has a `u/v` value that is not square.
-            //
-            // we check that by confirming that the hinted root satisfies
-            // hinted_root * hinted_root = NQR * u_div_v
+            // A failed decompression must have a nonsquare u/v. Verify the
+            // hinted inverse and nonzero square root of NQR * u/v below.
 
             // v_inv is checked to be canonical and a correct inverse.
             let v_inv = read_and_verify_canon();
